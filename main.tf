@@ -72,6 +72,79 @@ resource "helm_release" "vault" {
   }
 }
 
+resource "helm_release" "mongodb" {
+  name = "community-operator"
+  namespace = "mongodb"
+  create_namespace = true
+
+  repository = "https://mongodb.github.io/helm-charts"
+  chart = "community-operator"
+}
+
+resource "kubernetes_secret" "tmp-password" {
+  depends_on = [ helm_release.mongodb ]
+  metadata {
+    name = "tmp-password"
+    namespace = "mongodb"
+  }
+  data = {
+    password = "foobar"
+  }
+}
+
+resource "kubectl_manifest" "mongodb" {
+  depends_on = [ kubernetes_secret.tmp-password ]
+  yaml_body = <<-EOY
+    apiVersion: mongodbcommunity.mongodb.com/v1
+    kind: MongoDBCommunity
+    metadata:
+      name: mongodb
+      namespace: mongodb
+    spec:
+      members: 1
+      type: ReplicaSet
+      version: "6.0.13"
+      security:
+        authentication:
+          modes: [ "SCRAM" ]
+      users:
+      - name: admin
+        db: admin
+        passwordSecretRef:
+          name: tmp-password
+        roles:
+        - name: clusterAdmin
+          db: admin
+        - name: userAdminAnyDatabase
+          db: admin
+        scramCredentialsSecretName: admin
+      - name: tekton
+        db: admin
+        passwordSecretRef:
+          name: tmp-password
+        roles:
+        - name: readWrite
+          db: tekton-chains
+        scramCredentialsSecretName: tekton
+      additionalMongodConfig:
+        storage.wiredTiger.engineConfig.journalCompressor: zlib
+  EOY
+  wait = true
+}
+
+resource "null_resource" "wait_mongodb" {
+  depends_on = [ kubectl_manifest.mongodb ]
+  provisioner "local-exec" {
+    command = <<EOF
+while [[ -z $(kubectl -n mongodb get statefulset mongodb 2>/dev/null) ]]; do
+  echo "waiting..."
+  sleep 1
+done
+kubectl -n mongodb rollout status statefulset/mongodb
+EOF
+  }
+}
+
 resource "kubernetes_secret" "vault-token" {
   type = "kubernetes.io/service-account-token"
   metadata {
@@ -108,17 +181,17 @@ resource "vault_kubernetes_auth_backend_config" "auth" {
 resource "vault_kv_secret_v2" "secret" {
   depends_on = [ helm_release.vault ]
   mount = "secret"
-  name  = "example/config"
+  name  = "tekton/mongodb-creds"
   data_json = jsonencode(
     {
-      username = "exampleUser"
-      password = "examplePass"
+      username = "tekton"
+      password = "foobar"
     }
   )
 }
 
-resource "vault_policy" "example-policy" {
-  name   = "example-policy"
+resource "vault_policy" "tekton-policy" {
+  name   = "tekton-policy"
   policy = <<EOT
 path "${vault_kv_secret_v2.secret.mount}/data/${vault_kv_secret_v2.secret.name}" {
   capabilities = ["read", "list"]
@@ -164,133 +237,56 @@ EOT
 resource "vault_kubernetes_auth_backend_role" "role" {
   backend                          = vault_kubernetes_auth_backend_config.auth.backend
   role_name                        = var.v-role-name
-  bound_service_account_names      = ["default"]
-  bound_service_account_namespaces = ["default"]
+  bound_service_account_names      = ["tekton-chains-controller"]
+  bound_service_account_namespaces = ["tekton-chains"]
   token_ttl                        = 300
-  token_policies                   = [vault_policy.example-policy.name, vault_policy.transit-policy.name]
+  token_policies                   = [vault_policy.tekton-policy.name, vault_policy.transit-policy.name]
 }
 
-###
-data "http" "tekton-pipeline" {
-  url = "https://storage.googleapis.com/tekton-releases/pipeline/previous/v0.56.2/release.yaml"
-}
-
-locals {
-  p_m = {
-    for i, value in [
-      for yaml in split(
-        "\n---\n",
-        "\n${replace(data.http.tekton-pipeline.response_body, "/(?m)^---[[:blank:]]*(#.*)?$/", "---")}\n"
-      ) :
-      yamldecode(yaml)
-      if trimspace(replace(yaml, "/(?m)(^[[:blank:]]*(#.*)?$)+/", "")) != ""
-    ] : tostring(i) => value
-  }
-  # n_keys = compact([for i, m in local.p_m : m.kind == "Namespace" ? i : ""])
-  namespaces = [for key in compact([for i, m in local.p_m : m.kind == "Namespace" ? i : ""]) : lookup(local.p_m, key)]
-  sas = [for key in compact([for i, m in local.p_m : m.kind == "ServiceAccount" ? i : ""]) : lookup(local.p_m, key)]
-  crs = [for key in compact([for i, m in local.p_m : m.kind == "ClusterRole" ? i : ""]) : lookup(local.p_m, key)]
-  crbs = [for key in compact([for i, m in local.p_m : m.kind == "ClusterRoleBinding" ? i : ""]) : lookup(local.p_m, key)]
-  rs = [for key in compact([for i, m in local.p_m : m.kind == "Role" ? i : ""]) : lookup(local.p_m, key)]
-  rbs = [for key in compact([for i, m in local.p_m : m.kind == "RoleBinding" ? i : ""]) : lookup(local.p_m, key)]
-  ss = [for key in compact([for i, m in local.p_m : m.kind == "Secret" ? i : ""]) : lookup(local.p_m, key)]
-  cms = [for key in compact([for i, m in local.p_m : m.kind == "ConfigMap" ? i : ""]) : lookup(local.p_m, key)]
-  ds = [for key in compact([for i, m in local.p_m : m.kind == "Deployment" ? i : ""]) : lookup(local.p_m, key)]
-  svcs = [for key in compact([for i, m in local.p_m : m.kind == "Service" ? i : ""]) : lookup(local.p_m, key)]
-
-  hpas = [for key in compact([for i, m in local.p_m : m.kind == "HorizontalPodAutoscaler" ? i : ""]) : lookup(local.p_m, key)]
-  crds = [for key in compact([for i, m in local.p_m : m.kind == "CustomResourceDefinition" ? i : ""]) : lookup(local.p_m, key)]
-  vwcs = [for key in compact([for i, m in local.p_m : m.kind == "ValidatingWebhookConfiguration" ? i : ""]) : lookup(local.p_m, key)]
-}
-
-resource "kubectl_manifest" "pipeline_ns" {
+resource "null_resource" "tekton_pipeline_kustomize" {
   depends_on = [ vault_kubernetes_auth_backend_role.role ]
-  count = length(local.namespaces)
-  yaml_body = yamlencode(element(local.namespaces, count.index))
+  triggers = {
+    kustomize_path = sha256("pipeline/kustomization.yaml")
+  }
+  provisioner "local-exec" {
+    command  = "kubectl apply -k pipeline"
+  }
 }
 
-resource "kubectl_manifest" "pipeline_sa" {
-  depends_on = [ kubectl_manifest.pipeline_ns ]
-  count = length(local.sas)
-  yaml_body = yamlencode(element(local.sas, count.index))
+resource "null_resource" "wait_tekton_pipeline" {
+  depends_on = [ null_resource.tekton_pipeline_kustomize ]
+  provisioner "local-exec" {
+    command = <<EOF
+kubectl -n tekton-pipelines rollout status deploy/tekton-pipelines-controller deploy/tekton-pipelines-webhook deploy/tekton-events-controller
+kubectl -n tekton-pipelines-resolvers rollout status deploy/tekton-pipelines-remote-resolvers
+EOF
+  }
 }
 
-resource "kubectl_manifest" "pipeline_cr" {
-  depends_on = [ kubectl_manifest.pipeline_sa ]
-  count = length(local.crs)
-  yaml_body = yamlencode(element(local.crs, count.index))
+resource "null_resource" "tekton_chains_kustomize" {
+  depends_on = [ null_resource.wait_tekton_pipeline, null_resource.wait_mongodb ]
+  triggers = {
+    kustomize_path = sha256("chains/kustomization.yaml")
+  }
+  provisioner "local-exec" {
+    command     = "kubectl apply -k chains"
+  }
 }
 
-resource "kubectl_manifest" "pipeline_crb" {
-  depends_on = [ kubectl_manifest.pipeline_cr ]
-  count = length(local.crbs)
-  yaml_body = yamlencode(element(local.crbs, count.index))
+resource "null_resource" "wait_tekton_chains" {
+  depends_on = [ null_resource.tekton_chains_kustomize ]
+  provisioner "local-exec" {
+    command = <<EOF
+kubectl -n tekton-chains rollout status deploy/tekton-chains-controller
+EOF
+  }
 }
 
-resource "kubectl_manifest" "pipeline_r" {
-  depends_on = [ kubectl_manifest.pipeline_crb ]
-  count = length(local.rs)
-  yaml_body = yamlencode(element(local.rs, count.index))
+resource "kubernetes_manifest" "busybox" {
+  depends_on = [ null_resource.wait_tekton_chains ]
+  manifest = yamldecode(templatefile("busybox.yaml", {
+    vault-secret-mount = vault_kv_secret_v2.secret.mount
+    vault-secret-path = vault_kv_secret_v2.secret.name
+    vault-role = var.v-role-name
+  }))
 }
-
-resource "kubectl_manifest" "pipeline_rb" {
-  depends_on = [ kubectl_manifest.pipeline_r ]
-  count = length(local.rbs)
-  yaml_body = yamlencode(element(local.rbs, count.index))
-}
-
-resource "kubectl_manifest" "pipeline_s" {
-  depends_on = [ kubectl_manifest.pipeline_rb ]
-  count = length(local.ss)
-  yaml_body = yamlencode(element(local.ss, count.index))
-}
-
-resource "kubectl_manifest" "pipeline_cm" {
-  depends_on = [ kubectl_manifest.pipeline_s ]
-  count = length(local.cms)
-  yaml_body = yamlencode(element(local.cms, count.index))
-}
-
-resource "kubectl_manifest" "pipeline_d" {
-  depends_on = [ kubectl_manifest.pipeline_cm ]
-  count = length(local.ds)
-  yaml_body = yamlencode(element(local.ds, count.index))
-}
-
-resource "kubectl_manifest" "pipeline_svc" {
-  depends_on = [ kubectl_manifest.pipeline_d ]
-  count = length(local.svcs)
-  yaml_body = yamlencode(element(local.svcs, count.index))
-}
-
-data "http" "tekton-chains" {
-  url = "https://storage.googleapis.com/tekton-releases/chains/previous/v0.20.1/release.yaml"
-}
-
-data "kubectl_file_documents" "tekton-chains" {
-  content = data.http.tekton-chains.response_body
-}
-
-resource "kubectl_manifest" "tekton-chains" {
-  depends_on = [ kubectl_manifest.pipeline_svc ]
-  count     = length(data.kubectl_file_documents.tekton-chains.documents)
-  yaml_body = element(data.kubectl_file_documents.tekton-chains.documents, count.index)
-}
-
-# resource "kubernetes_manifest" "busybox" {
-#   depends_on = [ vault_kubernetes_auth_backend_role.role, vault_transit_secret_backend_key.tekton-key ]
-#   manifest = yamldecode(templatefile("busybox.yaml", {
-#     vault-secret-mount = vault_kv_secret_v2.secret.mount
-#     vault-secret-path = vault_kv_secret_v2.secret.name
-#     vault-role = var.v-role-name
-#   }))
-# }
-
-# resource "kubectl_manifest" "busybox" {
-#   depends_on = [ vault_kubernetes_auth_backend_role.role, vault_transit_secret_backend_key.tekton-key ]
-#   yaml_body = templatefile("busybox.yaml", {
-#     vault-secret-mount = vault_kv_secret_v2.secret.mount
-#     vault-secret-path = vault_kv_secret_v2.secret.name
-#     vault-role = var.v-role-name
-#   })
-# }

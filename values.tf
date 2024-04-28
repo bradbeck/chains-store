@@ -10,5 +10,5 @@ variable "k8s-config-context" {
 
 variable "v-role-name" {
   type = string
-  default = "example-role"
+  default = "tekton-role"
 }

@@ -1,2 +1,5 @@
 *terraform*
 *release.yaml
+config.json
+*-local.md
+cosign.*

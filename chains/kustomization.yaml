@@ -1,0 +1,97 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+- https://storage.googleapis.com/tekton-releases/chains/previous/v0.20.1/release.yaml
+patches:
+- target:
+    kind: Deployment
+    name: tekton-chains-controller
+  patch: |-
+    - op: add
+      path: /spec/template/metadata/annotations/vault.hashicorp.com~1agent-inject
+      value: "true"
+    - op: add
+      path: /spec/template/metadata/annotations/vault.hashicorp.com~1agent-inject-status
+      value: "update"
+    - op: add
+      path: /spec/template/metadata/annotations/vault.hashicorp.com~1agent-inject-token
+      value: "true"
+    - op: add
+      path: /spec/template/metadata/annotations/vault.hashicorp.com~1template-static-secret-render-interval
+      value: "10s"
+    - op: add
+      path: /spec/template/metadata/annotations/vault.hashicorp.com~1secret-volume-path
+      value: "/home/nonroot"
+    - op: add
+      path: /spec/template/metadata/annotations/vault.hashicorp.com~1role
+      value: "tekton-role"
+    - op: add
+      path: /spec/template/metadata/annotations/vault.hashicorp.com~1agent-run-as-user
+      value: "65532"
+    - op: add
+      path: /spec/template/metadata/annotations/vault.hashicorp.com~1agent-run-as-group
+      value: "65532"
+    - op: add
+      path: /spec/template/metadata/annotations/vault.hashicorp.com~1agent-inject-secret-mongodb-creds
+      value: "secret/data/tekton/mongodb-creds"
+    - op: add
+      path: /spec/template/metadata/annotations/vault.hashicorp.com~1agent-inject-template-mongodb-creds
+      value: |
+        {{- with secret "secret/data/tekton/mongodb-creds" -}}
+        export MONGO_SERVER_URL="mongodb://{{ .Data.data.username }}:{{ .Data.data.password }}@mongodb-0.mongodb-svc.mongodb.svc.cluster.local:27017/?authSource=admin&replicaSet=mongodb"
+        {{- end -}}
+    - op: replace
+      path: /spec/template/spec/containers/0/image
+      value: registry.redhat.io/openshift-pipelines/pipelines-chains-controller-rhel8:v1.14.3
+    - op: replace
+      path: /spec/template/spec/containers/0/command
+      value:
+      - /bin/sh
+      - -ec
+      - ln -sf /home/nonroot/token /home/nonroot/.vault-token && source /home/nonroot/mongodb-creds && /usr/local/bin/openshift-pipelines-chains-controller
+    - op: add
+      path: /spec/template/spec/containers/0/env/-
+      value:
+        name: HOME
+        value: /home/nonroot
+    - op: add
+      path: /spec/template/spec/containers/0/securityContext
+      value:
+        allowPrivilegeEscalation: false
+        capabilities:
+          drop:
+          - ALL
+        runAsGroup: 65532
+        runAsNonRoot: true
+        runAsUser: 65532
+        seccompProfile:
+          type: RuntimeDefault
+- target:
+    kind: ConfigMap
+    name: chains-config
+  patch: |-
+    - op: add
+      path: /data
+      value:
+        artifacts.taskrun.signer: kms
+        artifacts.taskrun.format: in-toto
+        artifacts.taskrun.storage: oci,docdb
+        artifacts.oci.signer: kms
+        artifacts.oci.storage: oci,docdb
+        signers.kms.kmsref: "hashivault://tekton-key"
+        signers.kms.auth.address: "http://vault.vault:8200"
+        storage.docdb.url: mongo://tekton-chains/bar?id_field=name
+- target:
+    kind: ServiceAccount
+  patch: |-
+    - op: add
+      path: /imagePullSecrets
+      value: [{name: regcred}]
+secretGenerator:
+- files:
+  - .dockerconfigjson=config.json
+  name: regcred
+  namespace: tekton-chains
+  type: kubernetes.io/dockerconfigjson
+generatorOptions:
+  disableNameSuffixHash: true

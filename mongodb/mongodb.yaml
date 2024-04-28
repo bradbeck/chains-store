@@ -1,0 +1,43 @@
+---
+apiVersion: mongodbcommunity.mongodb.com/v1
+kind: MongoDBCommunity
+metadata:
+  name: mongodb
+  namespace: mongodb
+spec:
+  members: 1
+  type: ReplicaSet
+  version: "6.0.13"
+  security:
+    authentication:
+      modes: ["SCRAM"]
+  users:
+    - name: admin
+      db: admin
+      passwordSecretRef:
+        name: temp-password
+      roles:
+        - name: clusterAdmin
+          db: admin
+        - name: userAdminAnyDatabase
+          db: admin
+      scramCredentialsSecretName: admin
+    - name: tekton
+      db: tekton-chains
+      passwordSecretRef:
+        name: temp-password
+      roles:
+        - name: readWrite
+          db: tekton-chains
+      scramCredentialsSecretName: tekton
+  additionalMongodConfig:
+    storage.wiredTiger.engineConfig.journalCompressor: zlib
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: temp-password
+  namespace: mongodb
+type: Opaque
+stringData:
+  password: foobar

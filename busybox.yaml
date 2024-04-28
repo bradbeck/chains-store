@@ -2,7 +2,7 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: busybox
-  namespace: default
+  namespace: tekton-chains
 spec:
   selector:
     matchLabels:
@@ -26,7 +26,7 @@ spec:
         vault.hashicorp.com/agent-run-as-user: "65532"
         vault.hashicorp.com/agent-run-as-group: "65532"
     spec:
-      serviceAccount: default
+      serviceAccount: tekton-chains-controller
       containers:
       - name: busybox
         image: cgr.dev/chainguard/busybox

@@ -1,0 +1,16 @@
+apiVersion: tekton.dev/v1beta1
+kind: PipelineRun
+metadata:
+  name: hello-pr
+spec:
+  pipelineSpec:
+    tasks:
+    - name: hello
+      taskSpec:
+        steps:
+        - name: echo
+          image: bash
+          script: |
+            #!/usr/bin/env bash
+            set -euo pipefail
+            echo "Hello World"
