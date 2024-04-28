@@ -170,28 +170,127 @@ resource "vault_kubernetes_auth_backend_role" "role" {
   token_policies                   = [vault_policy.example-policy.name, vault_policy.transit-policy.name]
 }
 
-# data "http" "tekton-pipeline" {
-#   url = "https://storage.googleapis.com/tekton-releases/pipeline/previous/v0.56.2/release.yaml"
-# }
-
-# data "kubectl_file_documents" "tekton-pipeline" {
-#   content = data.http.tekton-pipeline.response_body
-# }
-
-# resource "kubectl_manifest" "tekton-pipeline" {
-#   count     = length(data.kubectl_file_documents.tekton-pipeline.documents)
-#   yaml_body = element(data.kubectl_file_documents.tekton-pipeline.documents, count.index)
-# }
-
-# resource "kubectl_manifest" "tekton-pipeline" {
-#   yaml_body = file("pipeline-release.yaml")
-# }
-
-resource "kubectl_manifest" "busybox" {
-  depends_on = [ vault_kubernetes_auth_backend_role.role, vault_transit_secret_backend_key.tekton-key ]
-  yaml_body = templatefile("busybox.yaml", {
-    vault-secret-mount = vault_kv_secret_v2.secret.mount
-    vault-secret-path = vault_kv_secret_v2.secret.name
-    vault-role = var.v-role-name
-  })
+###
+data "http" "tekton-pipeline" {
+  url = "https://storage.googleapis.com/tekton-releases/pipeline/previous/v0.56.2/release.yaml"
 }
+
+locals {
+  p_m = {
+    for i, value in [
+      for yaml in split(
+        "\n---\n",
+        "\n${replace(data.http.tekton-pipeline.response_body, "/(?m)^---[[:blank:]]*(#.*)?$/", "---")}\n"
+      ) :
+      yamldecode(yaml)
+      if trimspace(replace(yaml, "/(?m)(^[[:blank:]]*(#.*)?$)+/", "")) != ""
+    ] : tostring(i) => value
+  }
+  # n_keys = compact([for i, m in local.p_m : m.kind == "Namespace" ? i : ""])
+  namespaces = [for key in compact([for i, m in local.p_m : m.kind == "Namespace" ? i : ""]) : lookup(local.p_m, key)]
+  sas = [for key in compact([for i, m in local.p_m : m.kind == "ServiceAccount" ? i : ""]) : lookup(local.p_m, key)]
+  crs = [for key in compact([for i, m in local.p_m : m.kind == "ClusterRole" ? i : ""]) : lookup(local.p_m, key)]
+  crbs = [for key in compact([for i, m in local.p_m : m.kind == "ClusterRoleBinding" ? i : ""]) : lookup(local.p_m, key)]
+  rs = [for key in compact([for i, m in local.p_m : m.kind == "Role" ? i : ""]) : lookup(local.p_m, key)]
+  rbs = [for key in compact([for i, m in local.p_m : m.kind == "RoleBinding" ? i : ""]) : lookup(local.p_m, key)]
+  ss = [for key in compact([for i, m in local.p_m : m.kind == "Secret" ? i : ""]) : lookup(local.p_m, key)]
+  cms = [for key in compact([for i, m in local.p_m : m.kind == "ConfigMap" ? i : ""]) : lookup(local.p_m, key)]
+  ds = [for key in compact([for i, m in local.p_m : m.kind == "Deployment" ? i : ""]) : lookup(local.p_m, key)]
+  svcs = [for key in compact([for i, m in local.p_m : m.kind == "Service" ? i : ""]) : lookup(local.p_m, key)]
+
+  hpas = [for key in compact([for i, m in local.p_m : m.kind == "HorizontalPodAutoscaler" ? i : ""]) : lookup(local.p_m, key)]
+  crds = [for key in compact([for i, m in local.p_m : m.kind == "CustomResourceDefinition" ? i : ""]) : lookup(local.p_m, key)]
+  vwcs = [for key in compact([for i, m in local.p_m : m.kind == "ValidatingWebhookConfiguration" ? i : ""]) : lookup(local.p_m, key)]
+}
+
+resource "kubectl_manifest" "pipeline_ns" {
+  depends_on = [ vault_kubernetes_auth_backend_role.role ]
+  count = length(local.namespaces)
+  yaml_body = yamlencode(element(local.namespaces, count.index))
+}
+
+resource "kubectl_manifest" "pipeline_sa" {
+  depends_on = [ kubectl_manifest.pipeline_ns ]
+  count = length(local.sas)
+  yaml_body = yamlencode(element(local.sas, count.index))
+}
+
+resource "kubectl_manifest" "pipeline_cr" {
+  depends_on = [ kubectl_manifest.pipeline_sa ]
+  count = length(local.crs)
+  yaml_body = yamlencode(element(local.crs, count.index))
+}
+
+resource "kubectl_manifest" "pipeline_crb" {
+  depends_on = [ kubectl_manifest.pipeline_cr ]
+  count = length(local.crbs)
+  yaml_body = yamlencode(element(local.crbs, count.index))
+}
+
+resource "kubectl_manifest" "pipeline_r" {
+  depends_on = [ kubectl_manifest.pipeline_crb ]
+  count = length(local.rs)
+  yaml_body = yamlencode(element(local.rs, count.index))
+}
+
+resource "kubectl_manifest" "pipeline_rb" {
+  depends_on = [ kubectl_manifest.pipeline_r ]
+  count = length(local.rbs)
+  yaml_body = yamlencode(element(local.rbs, count.index))
+}
+
+resource "kubectl_manifest" "pipeline_s" {
+  depends_on = [ kubectl_manifest.pipeline_rb ]
+  count = length(local.ss)
+  yaml_body = yamlencode(element(local.ss, count.index))
+}
+
+resource "kubectl_manifest" "pipeline_cm" {
+  depends_on = [ kubectl_manifest.pipeline_s ]
+  count = length(local.cms)
+  yaml_body = yamlencode(element(local.cms, count.index))
+}
+
+resource "kubectl_manifest" "pipeline_d" {
+  depends_on = [ kubectl_manifest.pipeline_cm ]
+  count = length(local.ds)
+  yaml_body = yamlencode(element(local.ds, count.index))
+}
+
+resource "kubectl_manifest" "pipeline_svc" {
+  depends_on = [ kubectl_manifest.pipeline_d ]
+  count = length(local.svcs)
+  yaml_body = yamlencode(element(local.svcs, count.index))
+}
+
+data "http" "tekton-chains" {
+  url = "https://storage.googleapis.com/tekton-releases/chains/previous/v0.20.1/release.yaml"
+}
+
+data "kubectl_file_documents" "tekton-chains" {
+  content = data.http.tekton-chains.response_body
+}
+
+resource "kubectl_manifest" "tekton-chains" {
+  depends_on = [ kubectl_manifest.pipeline_svc ]
+  count     = length(data.kubectl_file_documents.tekton-chains.documents)
+  yaml_body = element(data.kubectl_file_documents.tekton-chains.documents, count.index)
+}
+
+# resource "kubernetes_manifest" "busybox" {
+#   depends_on = [ vault_kubernetes_auth_backend_role.role, vault_transit_secret_backend_key.tekton-key ]
+#   manifest = yamldecode(templatefile("busybox.yaml", {
+#     vault-secret-mount = vault_kv_secret_v2.secret.mount
+#     vault-secret-path = vault_kv_secret_v2.secret.name
+#     vault-role = var.v-role-name
+#   }))
+# }
+
+# resource "kubectl_manifest" "busybox" {
+#   depends_on = [ vault_kubernetes_auth_backend_role.role, vault_transit_secret_backend_key.tekton-key ]
+#   yaml_body = templatefile("busybox.yaml", {
+#     vault-secret-mount = vault_kv_secret_v2.secret.mount
+#     vault-secret-path = vault_kv_secret_v2.secret.name
+#     vault-role = var.v-role-name
+#   })
+# }

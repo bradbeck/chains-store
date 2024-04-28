@@ -46,3 +46,4 @@ rm -rf .terraform* terraform*
 - <https://github.com/jacobmammoliti/vault-terraform-demo>
 - <https://github.com/filhodanuvem/from-dev-to-ops/blob/master/5-secrets/tf/kubernetes.tf#L19>
 - <https://github.com/buildpacks/ci/blob/main/k8s/tekton.tf#L34>
+- <https://peterdaugaardrasmussen.com/2021/12/01/terraform-create-resources-from-kubernetes-yaml-files-with-multiple-configurations/>
