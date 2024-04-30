@@ -73,13 +73,13 @@ patches:
     - op: add
       path: /data
       value:
+        artifacts.oci.signer: kms
         artifacts.taskrun.signer: kms
         artifacts.taskrun.format: in-toto
-        artifacts.taskrun.storage: oci,docdb
-        artifacts.oci.signer: kms
-        artifacts.oci.storage: oci,docdb
         signers.kms.kmsref: "hashivault://tekton-key"
         signers.kms.auth.address: "http://vault.vault:8200"
+        artifacts.oci.storage: oci,docdb
+        artifacts.taskrun.storage: oci,docdb
         storage.docdb.url: mongo://tekton-chains/bar?id_field=name
 - target:
     kind: ServiceAccount
