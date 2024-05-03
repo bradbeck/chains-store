@@ -35,7 +35,7 @@ k apply -f hello-pr.yaml
 tkn pr logs --last -f
 
 k run mongosh --rm -it --restart=Never --image mongo -- sh
-mongosh 'mongodb://tekton:foobar@mongodb-0.mongodb-svc.mongodb.svc.cluster.local:27017/tekton-chains?authSource=admin&replicaSet=mongodb'
+mongosh 'mongodb://tekton:foo^bar@mongodb-0.mongodb-svc.mongodb.svc.cluster.local:27017/tekton-chains?authSource=admin&replicaSet=mongodb'
 db.getCollection("bar").find({})
 db.getCollection("bar").deleteMany({})
 

@@ -16,10 +16,10 @@ k -n mongodb get secret mongodb-admin-admin -o json | jq -r '.data | with_entrie
 k -n mongodb get secret mongodb-tekton-chains-tekton -o json | jq -r '.data | with_entries(.value |= @base64d)'
 
 k run mongosh --rm -it --restart=Never --image mongo -- sh
-mongosh 'mongodb://admin:foobar@mongodb-0.mongodb-svc.mongodb.svc.cluster.local:27017/admin?replicaSet=mongodb&ssl=false'
-mongosh 'mongodb+srv://admin:foobar@mongodb-svc.mongodb.svc.cluster.local/admin?replicaSet=mongodb&ssl=false'
-mongosh 'mongodb://tekton:foobar@mongodb-0.mongodb-svc.mongodb.svc.cluster.local:27017/tekton-chains?replicaSet=mongodb&ssl=false'
-mongosh 'mongodb+srv://tekton:foobar@mongodb-svc.mongodb.svc.cluster.local/tekton-chains?replicaSet=mongodb&ssl=false'
+mongosh 'mongodb://admin:foo^bar@mongodb-0.mongodb-svc.mongodb.svc.cluster.local:27017/admin?replicaSet=mongodb&ssl=false'
+mongosh 'mongodb+srv://admin:foo^bar@mongodb-svc.mongodb.svc.cluster.local/admin?replicaSet=mongodb&ssl=false'
+mongosh 'mongodb://tekton:foo^bar@mongodb-0.mongodb-svc.mongodb.svc.cluster.local:27017/tekton-chains?replicaSet=mongodb&ssl=false'
+mongosh 'mongodb+srv://tekton:foo^bar@mongodb-svc.mongodb.svc.cluster.local/tekton-chains?replicaSet=mongodb&ssl=false'
 ```
 
 ## Cleanup
