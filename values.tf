@@ -12,3 +12,8 @@ variable "v-role-name" {
   type = string
   default = "tekton-role"
 }
+
+variable "mongo-pass" {
+  type = string
+  default = "foo!bar"
+}

@@ -28,14 +28,14 @@ k -n vault describe sa vault
 
 k -n mongodb get mdbc mongodb -o json | jq '.status'
 
-k -n tekton-chains logs deploy/tekton-chains-controller -c tekton-chains-controller -f
+k -n tekton-chains logs deploy/tekton-chains-controller -c tekton-chains-controller --tail=-1 -f
 
 
 k apply -f hello-pr.yaml
 tkn pr logs --last -f
 
 k run mongosh --rm -it --restart=Never --image mongo -- sh
-mongosh 'mongodb://tekton:foo^bar@mongodb-0.mongodb-svc.mongodb.svc.cluster.local:27017/tekton-chains?authSource=admin&replicaSet=mongodb'
+mongosh 'mongodb://tekton:foo!bar@mongodb-0.mongodb-svc.mongodb.svc.cluster.local:27017/tekton-chains?authSource=admin&replicaSet=mongodb'
 db.getCollection("bar").find({})
 db.getCollection("bar").deleteMany({})
 
@@ -54,6 +54,7 @@ cat /home/nonroot/config && echo
 ## Cleanup
 
 ```shell
+k delete -f hello-pr.yaml
 terraform apply -destroy -auto-approve -compact-warnings
 k delete crd --all
 colima delete -f

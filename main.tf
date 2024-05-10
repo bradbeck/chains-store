@@ -88,7 +88,7 @@ resource "kubernetes_secret" "tmp-password" {
     namespace = "mongodb"
   }
   data = {
-    password = "foo^bar"
+    password = var.mongo-pass
   }
 }
 
@@ -185,7 +185,7 @@ resource "vault_kv_secret_v2" "secret" {
   data_json = jsonencode(
     {
       username = "tekton"
-      password = "foo^bar"
+      password = var.mongo-pass
     }
   )
 }
