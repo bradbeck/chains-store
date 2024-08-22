@@ -1,4 +1,6 @@
-# Chains Attestation Storage Example
+# Tekton Chains Attestation Storage Example
+
+An example of deploying and using Tekton Chains with Hashicorp Vault and MongoDB.
 
 ## Setup
 
@@ -33,19 +35,25 @@ k -n tekton-chains logs deploy/tekton-chains-controller -c tekton-chains-control
 
 k apply -f hello-pr.yaml
 tkn pr logs --last -f
+k get tr hello-pr-hello -o json | jq .metadata.annotations
 
 k run mongosh --rm -it --restart=Never --image mongo -- sh
 mongosh 'mongodb://tekton:foo!bar@mongodb-0.mongodb-svc.mongodb.svc.cluster.local:27017/tekton-chains?authSource=admin&replicaSet=mongodb'
 db.getCollection("bar").find({})
 db.getCollection("bar").deleteMany({})
 
+k -n tekton-chains logs -c vault-agent-init deploy/busybox --tail=-1
+k -n tekton-chains logs -c vault-agent deploy/busybox --tail=-1
 k -n tekton-chains exec -it -c busybox deploy/busybox -- sh
 ls -al /home/nonroot
-cat /home/nonroot/config && echo
+cat /home/nonroot/MONGO_SERVER_URL && echo
 
 k -n tekton-chains get cm chains-config -o yaml
+k -n tekton-chains edit cm chains-config
 k -n tekton-chains get pod 
 k -n tekton-chains logs deploy/tekton-chains-controller -c vault-agent -f
+k -n tekton-chains exec -it -c vault-agent deploy/tekton-chains-controller -- /bin/sh
+ls -al /home/nonroot
 k -n tekton-chains exec -it -c tekton-chains-controller deploy/tekton-chains-controller -- /bin/sh
 ls -al /home/nonroot
 cat /home/nonroot/config && echo

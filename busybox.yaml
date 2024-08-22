@@ -17,8 +17,9 @@ spec:
         vault.hashicorp.com/agent-inject-token: "true"
         vault.hashicorp.com/template-static-secret-render-interval: 10s
         vault.hashicorp.com/secret-volume-path: "/home/nonroot"
-        vault.hashicorp.com/agent-inject-secret-config: "${vault-secret-mount}/data/${vault-secret-path}"
-        vault.hashicorp.com/agent-inject-template-config: |
+        vault.hashicorp.com/preserve-secret-case: "true"
+        vault.hashicorp.com/agent-inject-secret-MONGO_SERVER_URL: "${vault-secret-mount}/data/${vault-secret-path}"
+        vault.hashicorp.com/agent-inject-template-MONGO_SERVER_URL: |
           {{- with secret "${vault-secret-mount}/data/${vault-secret-path}" -}}
           export MONGO_SERVER_URL="mongodb://{{ .Data.data.username }}:{{ .Data.data.password }}@some.mongodb.server"
           {{- end -}}
@@ -34,7 +35,7 @@ spec:
         - sh
         - -c
         args:
-        - source /home/nonroot/config && sleep infinity
+        - source /home/nonroot/MONGO_SERVER_URL && sleep infinity
         resources:
           limits:
             memory: "128Mi"
