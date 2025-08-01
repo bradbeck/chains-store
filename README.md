@@ -32,15 +32,28 @@ k -n mongodb get mdbc mongodb -o json | jq '.status'
 
 k -n tekton-chains logs deploy/tekton-chains-controller -c tekton-chains-controller --tail=-1 -f
 
-
+# simple PipelineRun
 k apply -f hello-pr.yaml
 tkn pr logs --last -f
 k get tr hello-pr-hello -o json | jq .metadata.annotations
+k delete -f hello-pr.yaml
+
+# PipelineRun that produces multiple images
+sed "s/BASE_IMAGE/ttl.sh\/$(uuidgen | tr '[:upper:]' '[:lower:]')/" multi-image-pr.yaml | k apply -f -
+tkn pr logs --last -f
+k get tr multi-image-build -o json | jq .metadata.annotations
+# list the tags for the images, substitute UUID with the value from the task output
+regctl tag ls ttl.sh/UUID/artifact1
+regctl tag ls ttl.sh/UUID/artifact2
+k delete -f multi-image-pr.yaml
 
 k run mongosh --rm -it --restart=Never --image mongo -- sh
 mongosh 'mongodb://tekton:foo!bar@mongodb-0.mongodb-svc.mongodb.svc.cluster.local:27017/tekton-chains?authSource=admin&replicaSet=mongodb'
 db.getCollection("bar").find({})
 db.getCollection("bar").deleteMany({})
+
+# find image signatures, i.e. _id does not begin with "taskrun"
+db.getCollection("bar").find({_id: {$regex: '^((?!taskrun).)*$'}})
 
 k -n tekton-chains logs -c vault-agent-init deploy/busybox --tail=-1
 k -n tekton-chains logs -c vault-agent deploy/busybox --tail=-1
@@ -62,9 +75,6 @@ cat /home/nonroot/config && echo
 ## Cleanup
 
 ```shell
-k delete -f hello-pr.yaml
-terraform apply -destroy -auto-approve -compact-warnings
-k delete crd --all
 colima delete -f
 rm -rf .terraform* terraform*
 ```
@@ -80,3 +90,4 @@ rm -rf .terraform* terraform*
 - <https://github.com/GoogleCloudPlatform/cloud-ops-sandbox/blob/main/provisioning/terraform/online-boutique.tf#L59>
 - <https://github.com/mongodb/helm-charts/>
 - <https://github.com/mongodb/mongodb-kubernetes-operator/blob/master/config/samples/mongodb.com_v1_mongodbcommunity_cr.yaml>
+- <https://tekton.dev/docs/pipelines/pipelines/#passing-one-tasks-results-into-the-parameters-or-when-expressions-of-another>

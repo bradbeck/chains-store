@@ -1,0 +1,75 @@
+apiVersion: tekton.dev/v1
+kind: PipelineRun
+metadata:
+  name: multi-image
+spec:
+  pipelineSpec:
+    tasks:
+    - name: build
+      taskSpec:
+        params:
+        - name: base-image
+          default: "BASE_IMAGE"
+        results:
+          - name: artifact1
+          - name: digest1
+          - name: artifact2
+          - name: digest2
+          - name: IMAGES
+        steps:
+        - name: artifact1
+          image: docker.io/library/bash
+          script: |
+            #!/usr/bin/env bash
+            set -euo pipefail
+            echo -n "Hello World, Artifact1" | tee $(results.artifact1.path)
+        - name: put-artifact1
+          image: ghcr.io/regclient/regctl
+          args:
+          - artifact
+          - put
+          - --artifact-type
+          - application/example.test
+          - $(params.base-image)/artifact1:1h
+          - --file
+          - $(results.artifact1.path)
+        - name: digest-artifact1
+          image: ghcr.io/regclient/regctl
+          args:
+          - image
+          - digest
+          - $(params.base-image)/artifact1:1h
+          stdoutConfig:
+            path: $(results.digest1.path)
+        - name: artifact2
+          image: docker.io/library/bash
+          script: |
+            #!/usr/bin/env bash
+            set -euo pipefail
+            echo -n "Hello World, Artifact2" | tee $(results.artifact2.path)
+        - name: put-artifact2
+          image: ghcr.io/regclient/regctl
+          args:
+          - artifact
+          - put
+          - --artifact-type
+          - application/example.test
+          - $(params.base-image)/artifact2:1h
+          - --file
+          - $(results.artifact2.path)
+        - name: digest-artifact2
+          image: ghcr.io/regclient/regctl
+          args:
+          - image
+          - digest
+          - $(params.base-image)/artifact2:1h
+          stdoutConfig:
+            path: $(results.digest2.path)
+        - name: images
+          image: docker.io/library/bash
+          script: |
+            #!/usr/bin/env bash
+            set -euo pipefail
+            digest1=$(cat $(results.digest1.path))
+            digest2=$(cat $(results.digest2.path))
+            echo "$(params.base-image)/artifact1:1h@${digest1}, $(params.base-image)/artifact2:1h@${digest2}" | tee $(results.IMAGES.path)
