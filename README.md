@@ -47,6 +47,12 @@ regctl tag ls ttl.sh/UUID/artifact1
 regctl tag ls ttl.sh/UUID/artifact2
 k delete -f multi-image-pr.yaml
 
+# PipelineRun that produces multiple images using Tasks
+k apply -f multi-image-task-pr.yaml
+tkn pr logs --last -f
+k get tr multi-image-images -o json | jq .metadata.annotations
+k delete -f multi-image-task-pr.yaml
+
 k run mongosh --rm -it --restart=Never --image mongo -- sh
 mongosh 'mongodb://tekton:foo!bar@mongodb-0.mongodb-svc.mongodb.svc.cluster.local:27017/tekton-chains?authSource=admin&replicaSet=mongodb'
 db.getCollection("bar").find({})

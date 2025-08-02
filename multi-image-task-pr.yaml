@@ -1,0 +1,130 @@
+apiVersion: tekton.dev/v1
+kind: Task
+metadata:
+  name: base-image
+spec:
+  params:
+  - name: prefix
+    default: "ttl.sh"
+  results:
+  - name: url
+    type: string
+  steps:
+  - name: generate
+    image: docker.io/library/bash
+    script: |
+      #!/usr/bin/env bash
+      set -euo pipefail
+      UUID=$(cat /proc/sys/kernel/random/uuid)
+      printf "$(params.prefix)/${UUID}" | tee $(results.url.path)
+---
+apiVersion: tekton.dev/v1
+kind: Task
+metadata:
+  name: put-artifact
+spec:
+  params:
+  - name: base-image
+  - name: content
+  - name: artifact-name
+  - name: artifact-tag
+  results:
+  - name: artifact
+  - name: url
+  - name: digest
+  steps:
+  - name: generate
+    image: docker.io/library/bash
+    script: |
+      #!/usr/bin/env bash
+      set -euo pipefail
+      printf "$(params.content)" | tee $(results.artifact.path)
+      printf "$(params.base-image)/$(params.artifact-name):$(params.artifact-tag)" | tee $(results.url.path)
+  - name: push
+    image: ghcr.io/regclient/regctl
+    args:
+    - artifact
+    - put
+    - --artifact-type
+    - application/example.test
+    - $(params.base-image)/$(params.artifact-name):$(params.artifact-tag)
+    - --file
+    - $(results.artifact.path)
+  - name: digest
+    image: ghcr.io/regclient/regctl
+    args:
+    - image
+    - digest
+    - $(params.base-image)/$(params.artifact-name):$(params.artifact-tag)
+    stdoutConfig:
+      path: $(results.digest.path)
+---
+apiVersion: tekton.dev/v1
+kind: Task
+metadata:
+  name: emit-images
+spec:
+  params:
+  - name: images
+    type: array
+  results:
+  - name: IMAGES
+  steps:
+  - name: emit
+    image: docker.io/library/bash
+    args:
+    - $(params.images[*])
+    script: |
+      #!/usr/bin/env bash
+      set -euo pipefail
+      for image in "$@"
+      do
+        printf "${image}" | tee -a $(results.IMAGES.path)
+      done
+---
+apiVersion: tekton.dev/v1
+kind: PipelineRun
+metadata:
+  name: multi-image
+spec:
+  pipelineSpec:
+    tasks:
+    - name: base-image
+      taskRef:
+        kind: Task
+        name: base-image
+    - name: artifact1
+      taskRef:
+        kind: Task
+        name: put-artifact
+      params:
+      - name: base-image
+        value: "$(tasks.base-image.results.url)"
+      - name: content
+        value: "Hello World, Artifact1"
+      - name: artifact-name
+        value: "artifact1"
+      - name: artifact-tag
+        value: "5m"
+    - name: artifact2
+      taskRef:
+        kind: Task
+        name: put-artifact
+      params:
+      - name: base-image
+        value: "$(tasks.base-image.results.url)"
+      - name: content
+        value: "Hello World, Artifact2"
+      - name: artifact-name
+        value: "artifact2"
+      - name: artifact-tag
+        value: "5m"
+    - name: images
+      taskRef:
+        kind: Task
+        name: emit-images
+      params:
+      - name: images
+        value:
+        - "$(tasks.artifact1.results.url)@$(tasks.artifact1.results.digest)"
+        - "$(tasks.artifact2.results.url)@$(tasks.artifact2.results.digest)"
